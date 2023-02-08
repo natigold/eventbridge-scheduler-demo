@@ -1,0 +1,10 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "eventbridge-scheduler-demo"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-nts7a06r9sru"
+s3_prefix = "eventbridge-scheduler-demo"
+region = "eu-west-1"
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
