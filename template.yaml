@@ -25,13 +25,13 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-  DailyNatibeFunction:
+  DailyNatibleFunction:
     Type: AWS::Serverless::Function
     Properties:
       Description: !Sub
         - Stack ${AWS::StackName} Function ${ResourceName}
-        - ResourceName: DailyNatibeFunction
-      CodeUri: src/DailyNatibeFunction
+        - ResourceName: DailyNatibleFunction
+      CodeUri: src/DailyNatibleFunction
       Handler: index.handler
       Runtime: nodejs16.x
       MemorySize: 512
@@ -41,6 +41,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref UsersTable
           TABLE_ARN: !GetAtt UsersTable.Arn
+          GSI: timezone-index
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -67,25 +68,113 @@ Resources:
           Properties:
             ScheduleExpression: rate(5 minutes)
             Input: '{"timezone": "test"}'
-  DailyNatibeFunctionLogGroup:
+  DailyNatibleFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
     Properties:
-      LogGroupName: !Sub /aws/lambda/${DailyNatibeFunction}
-  Function:
+      LogGroupName: !Sub /aws/lambda/${DailyNatibleFunction}
+  ManualTestQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ManualTestQueue
+      MessageRetentionPeriod: 345600
+  DlqTestQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: DlqTestQueue
+      MessageRetentionPeriod: 345600
+  UnsubscribeQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+  UnsubscribeScheduleToSQSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: send-message-to-sqs
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt UnsubscribeQueue.Arn
+  UnsubscribeFunction:
     Type: AWS::Serverless::Function
     Properties:
       Description: !Sub
         - Stack ${AWS::StackName} Function ${ResourceName}
         - ResourceName: Function
-      CodeUri: src/Function
+      CodeUri: src/UnsubscribeFunction
       Handler: index.handler
-      Runtime: nodejs16.x
-      MemorySize: 3008
+      Runtime: nodejs18.x
+      MemorySize: 128
       Timeout: 30
       Tracing: Active
-  FunctionLogGroup:
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:UpdateSchedule
+                - scheduler:CreateSchedule
+                - scheduler:CreateScheduleGroup
+              Resource:
+                - !Sub arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/*/*
+                - !Sub arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/*
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource:
+                - !GetAtt UnsubscribeScheduleToSQSRole.Arn
+      Events:
+        unsubscribePOSTuserId:
+          Type: Api
+          Properties:
+            Path: /userId/
+            Method: POST
+            RestApiId: !Ref UnsubscribeApi
+      Environment:
+        Variables:
+          SQS_ROLE_ARN: !GetAtt UnsubscribeScheduleToSQSRole.Arn
+          SQS_ARN: !GetAtt UnsubscribeQueue.Arn
+  UnsubscribeFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
     Properties:
-      LogGroupName: !Sub /aws/lambda/${Function}
+      LogGroupName: !Sub /aws/lambda/${UnsubscribeFunction}
+  UnsubscribeApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub
+        - ${ResourceName}
+        - ResourceName: unsubscribe
+      StageName: Prod
+      DefinitionBody:
+        openapi: '3.0'
+        info: {}
+        paths:
+          /userId/:
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UnsubscribeFunction.Arn}/invocations
+              responses: {}
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+Outputs:
+  ApiEndpoint:
+    Description: Unsubscribe API Endpoint
+    Value: !Sub https://${UnsubscribeApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  ApiEndpointUserId:
+    Description: Unsubscribe API Endpoint with userId
+    Value: !Sub https://${UnsubscribeApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/userId/
