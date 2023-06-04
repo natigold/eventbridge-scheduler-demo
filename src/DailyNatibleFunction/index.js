@@ -18,6 +18,7 @@ exports.handler = async event => {
   return {};
 };
 
+// Pick all users from DDB with the specific timezone, and return a list of IDs
 const getUsersByTimezone = async (timezone) => {
   let params = {
     TableName: TABLE_NAME, // name of the table you want to read from 
