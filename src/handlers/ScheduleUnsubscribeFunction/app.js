@@ -6,10 +6,11 @@ SQS_ARN = process.env.SQS_ARN;
 
 const client = new SchedulerClient();
 
-exports.handler = async event => {
+exports.handler = async(event) => {
   if (event && event.body) {
     console.log(event.body);
     let payload = JSON.parse(event.body);
+    
     await createUnsubscriptionEvent(payload.userId);
 
     return {
@@ -26,12 +27,15 @@ exports.handler = async event => {
 };
 
 const createUnsubscriptionEvent = async (userId) => {
-  scheduleName = crypto.randomUUID();
+  const scheduleName = crypto.randomUUID();
+  const targetPayload = {
+    "userId": userId
+  };
 
   const target = {
     RoleArn: SQS_ROLE_ARN,
     Arn: SQS_ARN,
-    Input: JSON.stringify("userId: ${userId}"),
+    Input: JSON.stringify(targetPayload),
   };
   
   const schedulerInput = {

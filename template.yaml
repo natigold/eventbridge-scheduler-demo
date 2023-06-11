@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: eventbridge-scheduler-demo
 Transform: AWS::Serverless-2016-10-31
 Resources:
-  UsersTable:
+  NatibleUsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
@@ -14,8 +14,6 @@ Resources:
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
-        - AttributeName: timezone
-          KeyType: RANGE
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
       GlobalSecondaryIndexes:
@@ -31,20 +29,20 @@ Resources:
       Description: !Sub
         - Stack ${AWS::StackName} Function ${ResourceName}
         - ResourceName: DailyNatibleFunction
-      CodeUri: src/DailyNatibleFunction
-      Handler: index.handler
+      CodeUri: src/handlers/DailyNatibleFunction
+      Handler: app.handler
       Runtime: nodejs16.x
       MemorySize: 512
       Timeout: 30
       Tracing: Active
       Environment:
         Variables:
-          TABLE_NAME: !Ref UsersTable
-          TABLE_ARN: !GetAtt UsersTable.Arn
+          TABLE_NAME: !Ref NatibleUsersTable
+          TABLE_ARN: !GetAtt NatibleUsersTable.Arn
           GSI: timezone-index
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref UsersTable
+            TableName: !Ref NatibleUsersTable
       Events:
         ScheduleUTC:
           Type: ScheduleV2
@@ -63,11 +61,6 @@ Resources:
             ScheduleExpression: cron(30 8 * * ? *)
             ScheduleExpressionTimezone: America/New_York
             Input: '{"timezone": "America/New_York"}'
-        ScheduleTest:
-          Type: ScheduleV2
-          Properties:
-            ScheduleExpression: rate(5 minutes)
-            Input: '{"timezone": "test"}'
   DailyNatibleFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -107,15 +100,15 @@ Resources:
                 Action:
                   - sqs:SendMessage
                 Resource: !GetAtt UnsubscribeQueue.Arn
-  UnsubscribeFunction:
+  ScheduleUnsubscribeFunction:
     Type: AWS::Serverless::Function
     Properties:
       Description: !Sub
         - Stack ${AWS::StackName} Function ${ResourceName}
-        - ResourceName: Function
-      CodeUri: src/UnsubscribeFunction
-      Handler: index.handler
-      Runtime: nodejs18.x
+        - ResourceName: ScheduleUnsubscribeFunction
+      CodeUri: src/handlers/ScheduleUnsubscribeFunction
+      Handler: app.handler
+      Runtime: nodejs16.x
       MemorySize: 128
       Timeout: 30
       Tracing: Active
@@ -146,6 +139,43 @@ Resources:
         Variables:
           SQS_ROLE_ARN: !GetAtt UnsubscribeScheduleToSQSRole.Arn
           SQS_ARN: !GetAtt UnsubscribeQueue.Arn
+  ScheduleUnsubscribeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ScheduleUnsubscribeFunction}
+  UnsubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: UnsubscribeFunction
+      CodeUri: src/handlers/UnsubscribeFunction
+      Handler: app.handler
+      Runtime: nodejs16.x
+      MemorySize: 128
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref NatibleUsersTable
+          TABLE_ARN: !GetAtt NatibleUsersTable.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NatibleUsersTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+              Resource:
+                - !GetAtt UnsubscribeQueue.Arn
+      Events:
+        UnsubscribeQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt UnsubscribeQueue.Arn
+            BatchSize: 10
   UnsubscribeFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -167,7 +197,7 @@ Resources:
               x-amazon-apigateway-integration:
                 httpMethod: POST
                 type: aws_proxy
-                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UnsubscribeFunction.Arn}/invocations
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduleUnsubscribeFunction.Arn}/invocations
               responses: {}
       EndpointConfiguration: REGIONAL
       TracingEnabled: true

@@ -1,0 +1,16 @@
+{
+  "name": "unsubscribe-function",
+  "version": "0.0.1",
+  "description": "Unsubscribe Lambda function code",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.350.0",
+    "@aws-sdk/client-sqs": "^3.350.0",
+    "@aws-sdk/lib-dynamodb": "^3.350.0"
+  }
+}
