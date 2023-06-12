@@ -8,25 +8,64 @@ const client = new SchedulerClient();
 
 exports.handler = async(event) => {
   if (event && event.body) {
-    console.log(event.body);
     let payload = JSON.parse(event.body);
-    
-    await createUnsubscriptionEvent(payload.userId);
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify(`{\"userId\": \"${payload.userId}\"}`)
-    };
+    const todayDate = new Date();
+    const schedule = await createUnsubscriptionEvent(payload.userId, todayDate);
+
+    if (schedule) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify(
+          {
+            statusCode: 200,
+            message: "Success",
+            userId: payload.userId
+          }
+        )
+      };
+    } else {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          "error": "Error creating schedule",
+          "code": "500"
+        })
+      };
+    }
   } else {
-    console.log("No userId in event body");
+    console.error("No userId in event body");
 
     return {
-      statusCode: 400
-    };
+      statusCode: 400,
+      body: JSON.stringify({
+        "error": "No userId in event body",
+        "code": "400"
+      })
+    }
   }
 };
 
-const createUnsubscriptionEvent = async (userId) => {
+/* 
+ * Create a one time event to unsubscribe a user from the newsletter, at the end of the current month.
+ * 
+ * @param {string} userId - The user's id.
+ */
+const createUnsubscriptionEvent = async (userId, date) => {
+
+  let response;
+  let nextMonthDate;
+
+  // calculate the beginning of the next month
+  if (date.getMonth() == 11) {
+    nextMonthDate = new Date(date.getFullYear() + 1, 0, 1);
+  } else {
+    nextMonthDate = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+  }
+
+  // format date as YYYY-MM-DDTHH:MM:SS
+  const endOfMonthTimestamp = nextMonthDate.toISOString().split("T")[0] + "T00:00:00";
+ 
   const scheduleName = crypto.randomUUID();
   const targetPayload = {
     "userId": userId
@@ -44,18 +83,18 @@ const createUnsubscriptionEvent = async (userId) => {
       Mode: "OFF",
     },
     Target: target,
-    ScheduleExpression: 'at(2023-03-01T00:00:00)',
+    ScheduleExpressionTimezone: "UTC",
+    ScheduleExpression: `at(${endOfMonthTimestamp})`,
   };
   
   const command = new CreateScheduleCommand(schedulerInput);
 
-  // async/await.
   try {
-    const data = await client.send(command);
+    response = await client.send(command);
     console.log(`Succeeded creating schedule for ${userId}`);
   } catch (error) {
-    // error handling.
     console.log("Error processing schedule", error);
-  } finally {
   }
+
+  return response;
 }
